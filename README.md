@@ -1,2 +1,2 @@
 # tools
-Algunas herramientas
+Algunas herramientas (em PT-BR)
