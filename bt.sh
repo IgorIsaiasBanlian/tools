@@ -46,7 +46,7 @@ printf "Iniciando BT Manager.  Espera..." > /dev/tty1
 
 old_ifs="$IFS"
 
-ToggleWifi() {
+ToggleBT() {
   dialog --infobox "\nActivando el BT $1, espera..." 5 $width > /dev/tty1
   if [[ ${1} == "Off" ]]; then
 	sudo systemctl stop bluetooth.service &
@@ -58,6 +58,16 @@ ToggleWifi() {
 	sleep 5
   fi
   MainMenu
+}
+
+DisconnectAll() {
+	bluetoothctl devices | while read -r _ mac _; do bluetoothctl disconnect "$mac"; done
+	MainMenu
+}
+
+DeleteAll() {
+	bluetoothctl devices | while read -r _ mac _; do bluetoothctl remove "$mac"; done
+	MainMenu
 }
 
 ExitMenu() {
@@ -92,9 +102,9 @@ DeleteConnect() {
         sleep 1
         sudo bluetoothctl remove "$1"
         sleep 1
-		pulseaudio -k
+		#pulseaudio -k
 		sleep 0.5
-		pulseaudio --start
+		#pulseaudio --start
         ;;
   esac
 
@@ -144,13 +154,22 @@ clist=`bluetoothctl paired-devices | awk '{$1=""; print $2"-"substr($0, index($0
 Select() {
   dialog --infobox "\nConectando al Bluetooth $1 ..." 5 $width > /dev/tty1
   clist2=bluetoothctl paired-devices | awk '{$1=""; print $2":"substr($0, index($0,$3))}'
-  
+  connection_output=$(sudo bluetoothctl disconnect "$1")
+  sleep 0.5  
+  connection_output=$(sudo pulseaudio -k -v)
+  sleep 0.5
+  connection_output=$(sudo pulseaudio --start -v)
+  sleep 0.5
   connection_output=$(sudo bluetoothctl trust "$1")
+  sleep 0.5
   connection_output=$(sudo bluetoothctl pair "$1")
-  connection_output=$(pulseaudio -k -v)
-  connection_output=$(pulseaudio --start -v)
+  sleep 0.5
   connection_output=$(sudo bluetoothctl connect "$1")
-
+  echo "${1//:/_}" > /home/ark/last_bluetooth
+  connection_output_=$(pactl set-card-profile bluez_card."${1//:/_}" a2dp_sink)
+  connection_output_=$(pactl set-default-sink bluez_sink."${1//:/_}".a2dp_sink)
+  sleep 0.5
+  
   # Verificar si la conexión fue exitosa
   if echo "$connection_output" | grep -q 'Connection successful'; then
       output="Dispositivo emparejado y conectado al BT ..."
@@ -171,7 +190,16 @@ Connect() {
   # Iniciar el escaneo
   bluetoothctl scan on &
   SCAN_PID=$!
-  sleep 20
+  
+  DURATION=15  # Duración en segundos
+  END_TIME=$((SECONDS + DURATION))
+  while [ $SECONDS -lt $END_TIME ]; do
+  echo 1 > /sys/class/gpio/gpio77/value
+  sleep 0.1
+  echo 0 > /sys/class/gpio/gpio77/value
+  sleep 0.1
+  done
+  #sleep 15
   bluetoothctl scan off
   kill $SCAN_PID 2>/dev/null
 
@@ -265,8 +293,7 @@ Delete() {
   done
 }
 
-
-NetworkInfo() {
+BluetoothInfo() {
   dev=`bluetoothctl list | grep Controller | cut -c 12-45`
   dialog --clear --backtitle "Información del Bluetooth" --title "" --clear \
   --msgbox "\n\nDispositivo: $dev\n" $height $width 2>&1 > /dev/tty1
@@ -278,9 +305,9 @@ NetworkInfo() {
 MainMenu() {
 
   if [[ "$(tr -d '\0' < /proc/device-tree/compatible)" == *"rk3566"* ]]; then
-    mainoptions=( 1 "Turn BT $Wifi_MStat (Currently: $Wifi_Stat)" 2 "Connect to new Wifi connection" 3 "Activate existing Wifi Connection" 4 "Delete exiting connections" 5 "Current Network Info" 6 "Change Country Code" 7 "Exit" )
+    mainoptions=( 1 "Activar BT $bt_MStat (Currently: $Wifi_Stat)" 2 "Connect to new Wifi connection" 3 "Activate existing Wifi Connection" 4 "Delete exiting connections" 5 "Current Network Info" 6 "Change Country Code" 7 "Exit" )
   else
-    mainoptions=( 2 "Vincular un dispositivo Bluetooth" 3 "Conectar a dispositivo ya emparejado" 4 "Borrar dispositivo emparejado" 5 "Información del dispositivo" 6 "Salir" )
+    mainoptions=( 0 "Activar Bluetooth" 1 "Vincular un dispositivo Bluetooth" 2 "Conectar a dispositivo ya emparejado" 3 "Borrar dispositivo emparejado" 4 "Desconectar TODOS los dispositivos" 5 "BORRAR todos los dispositivos" 6 "Información del dispositivo" 7 "Salir" )
     
   fi
   IFS="$old_ifs"
@@ -299,12 +326,14 @@ MainMenu() {
 	fi
     for mchoice in $mainchoices; do
       case $mchoice in
-		1) ToggleWifi $Wifi_MStat ;;
-    2) Connect ;;
-    3) Activate ;;
-		4) Delete ;;
-		5) NetworkInfo ;;
-		6) ExitMenu ;;
+		0) ToggleBT $bt_MStat ;;
+		1) Connect ;;
+		2) Activate ;;
+		3) Delete ;;
+		4) DisconnectAll ;;
+		5) DeleteAll ;;
+		6) BluetoothInfo ;;
+		7) ExitMenu ;;
       esac
     done
   done
